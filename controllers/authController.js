@@ -4,11 +4,32 @@ import jwt from "jsonwebtoken";
 import { pool } from "../config/db.js";
 import { sendVerificationEmail } from "../utils/mailer.js";
 
+const isLocalAppUrl = () => /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?$/i.test(process.env.APP_URL || "http://localhost:5173");
+const envAdminEmail = process.env.MASTER_ADMIN_EMAIL?.trim();
+const envAdminPassword = process.env.MASTER_ADMIN_PASSWORD?.trim();
+const envAdminName = process.env.MASTER_ADMIN_NAME?.trim() || "Master Admin";
+const envAdminId = "env-master-admin";
+
+const isEnvAdminCredentials = (email, password) =>
+  Boolean(envAdminEmail && envAdminPassword && email === envAdminEmail && password === envAdminPassword);
+
+const buildEnvAdminUser = () => ({
+  id: envAdminId,
+  name: envAdminName,
+  email: envAdminEmail,
+  role: "admin",
+  status: "active",
+  avatar_url: null,
+  bio: "Environment-based master admin",
+  email_verified_at: new Date().toISOString(),
+  created_at: null
+});
+
 const signToken = (user) =>
   jwt.sign(
     { id: user.id, email: user.email, role: user.role, name: user.name },
     process.env.JWT_SECRET || "change-this-secret",
-    { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+    { expiresIn: "7d" }
   );
 
 const hashVerificationToken = (token) =>
@@ -49,7 +70,7 @@ export const register = async (req, res, next) => {
       user: rows[0],
       message: "Registration successful. Please verify your email before logging in.",
       verificationRequired: true,
-      verificationUrl: process.env.NODE_ENV === "development" ? verificationUrl : undefined
+      verificationUrl: isLocalAppUrl() ? verificationUrl : undefined
     });
   } catch (error) {
     next(error);
@@ -59,8 +80,23 @@ export const register = async (req, res, next) => {
 export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
+
+    if (isEnvAdminCredentials(email, password)) {
+      const envAdminUser = buildEnvAdminUser();
+      return res.json({
+        token: signToken(envAdminUser),
+        user: {
+          id: envAdminUser.id,
+          name: envAdminUser.name,
+          email: envAdminUser.email,
+          role: envAdminUser.role,
+          status: envAdminUser.status
+        }
+      });
+    }
+
     const [rows] = await pool.query(
-      "SELECT id, name, email, role, status, password_hash FROM users WHERE email = ?",
+      "SELECT id, name, email, role, status, password_hash, email_verified_at FROM users WHERE email = ?",
       [email]
     );
     const user = rows[0];
@@ -96,6 +132,10 @@ export const login = async (req, res, next) => {
 
 export const me = async (req, res, next) => {
   try {
+    if (req.user.id === envAdminId && req.user.email === envAdminEmail) {
+      return res.json(buildEnvAdminUser());
+    }
+
     const [rows] = await pool.query(
       "SELECT id, name, email, role, status, avatar_url, bio, email_verified_at, created_at FROM users WHERE id = ?",
       [req.user.id]
@@ -181,7 +221,7 @@ export const resendVerificationEmail = async (req, res, next) => {
 
     res.json({
       message: "Verification email sent.",
-      verificationUrl: process.env.NODE_ENV === "development" ? verificationUrl : undefined
+      verificationUrl: isLocalAppUrl() ? verificationUrl : undefined
     });
   } catch (error) {
     next(error);

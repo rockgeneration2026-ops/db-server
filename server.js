@@ -17,6 +17,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
+const defaultCorsOrigins = ["http://localhost:5173", "http://localhost:5174"];
+
 const app = express();
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -25,7 +27,7 @@ const limiter = rateLimit({
 
 app.use(
   cors({
-    origin: (process.env.CORS_ORIGIN || "").split(",").filter(Boolean),
+    origin: defaultCorsOrigins,
     credentials: true
   })
 );
@@ -52,8 +54,19 @@ const port = Number(process.env.PORT || 5000);
 
 try {
   await verifyDatabaseConnection();
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Darkgorkha API running on port ${port}`);
+  });
+  server.on("error", (error) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use. Another server instance is probably already running.`);
+      console.error(`If you want a new instance, stop the process using port ${port} or change PORT in .env.`);
+      process.exit(1);
+    }
+
+    console.error("Server failed to start.");
+    console.error(error.message);
+    process.exit(1);
   });
 } catch (error) {
   console.error("Database connection failed.");
