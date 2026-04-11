@@ -47,6 +47,17 @@ const parseJsonValue = (value) => {
   return value;
 };
 
+const inferAdPageScope = (placementKey = "") => {
+  const key = String(placementKey).trim();
+  if (key.startsWith("home.")) return "home";
+  if (key.startsWith("tools.") || key.startsWith("tool.detail.")) return "tools";
+  if (key.startsWith("calculators.") || key.startsWith("calculator.detail.")) return "calculators";
+  if (key.startsWith("ai-tools.") || key.startsWith("ai-tool.detail.")) return "ai-tools";
+  if (key.startsWith("blog.")) return "blog";
+  if (key.startsWith("global.")) return "global";
+  return "";
+};
+
 const resolvePublicServerOrigin = (req) => {
   const forwardedProto = req.headers["x-forwarded-proto"];
   const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto || req.protocol || "http").split(",")[0].trim();
@@ -140,20 +151,24 @@ export const listContent = (resource) => async (req, res, next) => {
       params.push(req.query.placementKey);
     }
 
+    const isScopedPublicAdsRequest = resource === "ads" && !adminMode && Boolean(req.query.pageScope);
+    const effectiveLimit = isScopedPublicAdsRequest ? 200 : limit;
+    const effectiveOffset = isScopedPublicAdsRequest ? 0 : offset;
+
     const where = `WHERE ${filters.join(" AND ")}`;
     if (resource === "ads" && !adminMode) {
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
     }
     const [rows] = await pool.query(
       `SELECT ${fieldMap[resource]} FROM ${config.table} t ${joins[resource]} ${where} ORDER BY t.${sortBy} ${order} LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      [...params, effectiveLimit, effectiveOffset]
     );
     const [countRows] = await pool.query(
       `SELECT COUNT(*) AS total FROM ${config.table} t ${joins[resource]} ${where}`,
       params
     );
 
-    res.json(listResponse(rows, countRows[0].total, page, limit));
+    res.json(listResponse(rows, countRows[0].total, page, effectiveLimit));
   } catch (error) {
     next(error);
   }
@@ -198,6 +213,18 @@ export const createContent = (resource) => async (req, res, next) => {
   try {
     const table = tableMap[resource].table;
     const payload = { ...req.body };
+
+    if (resource === "ads") {
+      if (payload.placement_key) {
+        const inferredScope = inferAdPageScope(payload.placement_key);
+        if (inferredScope) {
+          payload.page_scope = inferredScope;
+        }
+      }
+      if (payload.is_active !== undefined) {
+        payload.is_active = Number(payload.is_active) ? 1 : 0;
+      }
+    }
 
     if (!payload.slug) {
       payload.slug = slugify(payload.name || payload.title || "item", { lower: true, strict: true });
@@ -267,14 +294,28 @@ export const submitUserBlog = async (req, res, next) => {
 export const updateContent = (resource) => async (req, res, next) => {
   try {
     const table = tableMap[resource].table;
-    const columns = Object.keys(req.body);
+    const payload = { ...req.body };
+
+    if (resource === "ads") {
+      if (payload.placement_key) {
+        const inferredScope = inferAdPageScope(payload.placement_key);
+        if (inferredScope) {
+          payload.page_scope = inferredScope;
+        }
+      }
+      if (payload.is_active !== undefined) {
+        payload.is_active = Number(payload.is_active) ? 1 : 0;
+      }
+    }
+
+    const columns = Object.keys(payload);
     if (!columns.length) {
       return res.status(400).json({ message: "No update payload provided." });
     }
 
     await pool.query(
       `UPDATE ${table} SET ${columns.map((column) => `${column} = ?`).join(", ")} WHERE id = ?`,
-      [...Object.values(req.body), req.params.id]
+      [...Object.values(payload), req.params.id]
     );
     res.json({ message: `${resource} updated.` });
   } catch (error) {
