@@ -7,18 +7,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadsRoot = path.resolve(__dirname, "../uploads");
 const blogUploadsDir = path.join(uploadsRoot, "blogs");
+const adUploadsDir = path.join(uploadsRoot, "ads");
 
 fs.mkdirSync(blogUploadsDir, { recursive: true });
+fs.mkdirSync(adUploadsDir, { recursive: true });
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, blogUploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, "-").toLowerCase();
-    cb(null, `${Date.now()}-${safeName}`);
-  }
-});
+const createStorage = (targetDir) =>
+  multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, targetDir);
+    },
+    filename: (req, file, cb) => {
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, "-").toLowerCase();
+      cb(null, `${Date.now()}-${safeName}`);
+    }
+  });
 
 const imageFileFilter = (req, file, cb) => {
   if (!file.mimetype.startsWith("image/")) {
@@ -29,7 +32,15 @@ const imageFileFilter = (req, file, cb) => {
 };
 
 export const uploadBlogImage = multer({
-  storage,
+  storage: createStorage(blogUploadsDir),
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024
+  }
+});
+
+export const uploadAdImage = multer({
+  storage: createStorage(adUploadsDir),
   fileFilter: imageFileFilter,
   limits: {
     fileSize: 5 * 1024 * 1024

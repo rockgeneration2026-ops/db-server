@@ -24,7 +24,7 @@ const fieldMap = {
   calculators: "t.id, t.name, t.slug, t.short_description, t.description, t.formula_text, t.featured, t.status, t.meta_title, t.meta_description, t.seo_keywords, c.name AS category_name, c.slug AS category_slug",
   "ai-tools": "t.id, t.name, t.slug, t.description, t.features, t.pricing, t.external_url, t.rating, t.screenshots, t.tags, t.featured, t.sponsored, t.status, t.meta_title, t.meta_description, t.seo_keywords, c.name AS category_name, c.slug AS category_slug",
   blogs: "t.id, t.title, t.slug, t.excerpt, t.content, t.featured_image, t.seo_title, t.seo_description, t.seo_keywords, t.featured, t.status, t.published_at, c.name AS category_name, c.slug AS category_slug, u.name AS author_name",
-  ads: "t.id, t.name, t.slug, t.provider, t.ad_type, t.placement_key, t.page_scope, t.html_code, t.image_url, t.target_url, t.is_active, t.starts_at, t.ends_at"
+  ads: "t.id, t.name, t.slug, t.provider, t.ad_type, t.placement_key, t.page_scope, t.html_code, t.image_source, t.image_url, t.target_url, t.is_active, t.starts_at, t.ends_at"
 };
 
 const joins = {
@@ -45,6 +45,23 @@ const parseJsonValue = (value) => {
     }
   }
   return value;
+};
+
+const resolvePublicServerOrigin = (req) => {
+  if (process.env.SERVER_PUBLIC_URL) {
+    return process.env.SERVER_PUBLIC_URL.replace(/\/$/, "");
+  }
+
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto || req.protocol || "http").split(",")[0].trim();
+  const host = req.headers["x-forwarded-host"] || req.get("host");
+
+  if (host) {
+    return `${proto}://${host}`;
+  }
+
+  const baseUrl = process.env.APP_URL || "http://localhost:5173";
+  return baseUrl.replace(/\/$/, "").replace(":5173", `:${process.env.PORT || 5000}`);
 };
 
 const canViewHidden = (req) =>
@@ -94,6 +111,22 @@ export const listContent = (resource) => async (req, res, next) => {
       params.push(Number(req.query.rating));
     }
 
+    if (resource === "ads" && !adminMode) {
+      // Public ad feed should use the latest ad per placement/scope,
+      // so deactivating the latest one hides that placement immediately.
+      filters.push(
+        `t.id IN (
+          SELECT latest.id
+          FROM ads latest
+          INNER JOIN (
+            SELECT placement_key, page_scope, MAX(id) AS max_id
+            FROM ads
+            GROUP BY placement_key, page_scope
+          ) grouped ON grouped.max_id = latest.id
+        )`
+      );
+    }
+
     if (resource === "ads" && req.query.pageScope) {
       const scopes = String(req.query.pageScope)
         .split(",")
@@ -112,6 +145,9 @@ export const listContent = (resource) => async (req, res, next) => {
     }
 
     const where = `WHERE ${filters.join(" AND ")}`;
+    if (resource === "ads" && !adminMode) {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    }
     const [rows] = await pool.query(
       `SELECT ${fieldMap[resource]} FROM ${config.table} t ${joins[resource]} ${where} ORDER BY t.${sortBy} ${order} LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -316,11 +352,18 @@ export const getHomepage = async (req, res, next) => {
       LIMIT 4`
     );
     const [ads] = await pool.query(
-      `SELECT name, slug, placement_key, html_code, provider, target_url, is_active, starts_at, ends_at
-       FROM ads
-       WHERE ${activeAdClause.replaceAll("t.", "")}
-         AND page_scope IN ('home', 'global')
-       ORDER BY placement_key ASC, created_at DESC`
+      `SELECT a.name, a.slug, a.placement_key, a.html_code, a.provider, a.target_url, a.is_active, a.starts_at, a.ends_at
+       FROM ads a
+       INNER JOIN (
+         SELECT placement_key, page_scope, MAX(id) AS max_id
+         FROM ads
+         GROUP BY placement_key, page_scope
+       ) latest ON latest.max_id = a.id
+       WHERE a.is_active = 1
+         AND (a.starts_at IS NULL OR a.starts_at <= NOW())
+         AND (a.ends_at IS NULL OR a.ends_at >= NOW())
+         AND a.page_scope IN ('home', 'global')
+       ORDER BY a.placement_key ASC`
     );
     res.json({
       hero: parseJsonValue(heroRows[0]?.setting_value),
@@ -450,12 +493,34 @@ export const uploadEditorImage = async (req, res, next) => {
       return res.status(400).json({ message: "Image file is required." });
     }
 
-    const baseUrl = process.env.APP_URL || "http://localhost:5173";
-    const origin = baseUrl.replace(/\/$/, "").replace(":5173", `:${process.env.PORT || 5000}`);
+    const origin = resolvePublicServerOrigin(req);
     const fileUrl = `${origin}/uploads/blogs/${req.file.filename}`;
 
     res.status(201).json({
       message: "Image uploaded successfully.",
+      file: {
+        url: fileUrl,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        size: req.file.size
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const uploadAdImage = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Image file is required." });
+    }
+
+    const origin = resolvePublicServerOrigin(req);
+    const fileUrl = `${origin}/uploads/ads/${req.file.filename}`;
+
+    return res.status(201).json({
+      message: "Ad image uploaded successfully.",
       file: {
         url: fileUrl,
         filename: req.file.filename,

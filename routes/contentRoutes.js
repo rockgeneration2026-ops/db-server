@@ -13,11 +13,12 @@ import {
   listSubmissions,
   submitUserBlog,
   trackAnalytics,
+  uploadAdImage,
   uploadEditorImage,
   updateContent
 } from "../controllers/contentController.js";
 import { attachUserIfAuthenticated, authenticate, authorize } from "../middlewares/auth.js";
-import { uploadBlogImage } from "../middlewares/upload.js";
+import { uploadAdImage as uploadAdImageFile, uploadBlogImage } from "../middlewares/upload.js";
 
 const router = Router();
 
@@ -70,6 +71,13 @@ router.post(
   authorize("admin", "editor"),
   uploadBlogImage.single("image"),
   uploadEditorImage
+);
+router.post(
+  "/uploads/ad-image",
+  authenticate,
+  authorize("admin"),
+  uploadAdImageFile.single("image"),
+  uploadAdImage
 );
 
 export default router;

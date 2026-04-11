@@ -146,6 +146,56 @@ export const me = async (req, res, next) => {
   }
 };
 
+export const updateMe = async (req, res, next) => {
+  try {
+    if (req.user.id === envAdminId && req.user.email === envAdminEmail) {
+      return res.status(400).json({ message: "Environment-based admin profile cannot be edited from this endpoint." });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (typeof req.body.name === "string") {
+      const name = req.body.name.trim();
+      if (!name) {
+        return res.status(400).json({ message: "Name cannot be empty." });
+      }
+      updates.push("name = ?");
+      values.push(name);
+    }
+
+    if (typeof req.body.bio === "string") {
+      updates.push("bio = ?");
+      values.push(req.body.bio.trim());
+    }
+
+    if (typeof req.body.avatarUrl === "string") {
+      updates.push("avatar_url = ?");
+      values.push(req.body.avatarUrl.trim() || null);
+    }
+
+    if (!updates.length) {
+      return res.status(400).json({ message: "No profile updates provided." });
+    }
+
+    values.push(req.user.id);
+
+    await pool.query(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, values);
+
+    const [rows] = await pool.query(
+      "SELECT id, name, email, role, status, avatar_url, bio, email_verified_at, created_at FROM users WHERE id = ?",
+      [req.user.id]
+    );
+
+    return res.json({
+      message: "Profile updated successfully.",
+      user: rows[0] || null
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const verifyEmail = async (req, res, next) => {
   try {
     const token = req.body.token?.trim();
