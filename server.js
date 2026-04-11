@@ -36,7 +36,7 @@ app.use(limiter);
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.resolve(__dirname, "uploads")));
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", service: "darkgorkha-api" });

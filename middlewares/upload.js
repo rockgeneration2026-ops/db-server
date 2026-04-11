@@ -1,8 +1,11 @@
 import fs from "fs";
 import path from "path";
 import multer from "multer";
+import { fileURLToPath } from "url";
 
-const uploadsRoot = path.resolve(process.cwd(), "uploads");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsRoot = path.resolve(__dirname, "../uploads");
 const blogUploadsDir = path.join(uploadsRoot, "blogs");
 
 fs.mkdirSync(blogUploadsDir, { recursive: true });
@@ -32,4 +35,3 @@ export const uploadBlogImage = multer({
     fileSize: 5 * 1024 * 1024
   }
 });
-
