@@ -48,10 +48,6 @@ const parseJsonValue = (value) => {
 };
 
 const resolvePublicServerOrigin = (req) => {
-  if (process.env.SERVER_PUBLIC_URL) {
-    return process.env.SERVER_PUBLIC_URL.replace(/\/$/, "");
-  }
-
   const forwardedProto = req.headers["x-forwarded-proto"];
   const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto || req.protocol || "http").split(",")[0].trim();
   const host = req.headers["x-forwarded-host"] || req.get("host");
