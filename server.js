@@ -17,7 +17,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-const defaultCorsOrigins = ["http://localhost:5173", "http://localhost:5174"];
+const configuredOrigins = (process.env.CORS_ORIGIN || process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const fallbackOrigins = [process.env.APP_URL, process.env.ADMIN_URL, "http://localhost:5173", "http://localhost:5174"]
+  .filter(Boolean);
+const allowedOrigins = configuredOrigins.length ? configuredOrigins : fallbackOrigins;
 
 const app = express();
 const limiter = rateLimit({
@@ -25,12 +32,22 @@ const limiter = rateLimit({
   limit: 300
 });
 
-app.use(
-  cors({
-    origin: defaultCorsOrigins,
-    credentials: true
-  })
-);
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("CORS blocked for this origin"));
+  },
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(helmet());
 app.use(limiter);
 app.use(express.json({ limit: "2mb" }));
@@ -38,8 +55,33 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 app.use("/uploads", express.static(path.resolve(__dirname, "uploads")));
 
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "darkgorkha-api" });
+app.get("/api/health", async (req, res) => {
+  try {
+    await verifyDatabaseConnection();
+    res.json({
+      status: "ok",
+      service: "darkgorkha-api",
+      database: { connected: true }
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: "degraded",
+      service: "darkgorkha-api",
+      database: { connected: false, message: error.message }
+    });
+  }
+});
+
+app.get("/api/status", async (_req, res) => {
+  try {
+    await verifyDatabaseConnection();
+    res.json({ connected: true, message: "Database connected successfully" });
+  } catch (error) {
+    res.status(500).json({
+      connected: false,
+      message: `Connection failed: ${error?.message || "Unknown database error"}`
+    });
+  }
 });
 
 app.use("/api/auth", authRoutes);
@@ -52,25 +94,28 @@ app.use(errorHandler);
 
 const port = Number(process.env.PORT || 5000);
 
-try {
-  await verifyDatabaseConnection();
-  const server = app.listen(port, () => {
-    console.log(`Darkgorkha API running on port ${port}`);
-  });
-  server.on("error", (error) => {
-    if (error.code === "EADDRINUSE") {
-      console.error(`Port ${port} is already in use. Another server instance is probably already running.`);
-      console.error(`If you want a new instance, stop the process using port ${port} or change PORT in .env.`);
-      process.exit(1);
-    }
+const server = app.listen(port, () => {
+  console.log(`Darkgorkha API running on port ${port}`);
+});
 
-    console.error("Server failed to start.");
-    console.error(error.message);
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`Port ${port} is already in use. Another server instance is probably already running.`);
+    console.error(`If you want a new instance, stop the process using port ${port} or change PORT in .env.`);
     process.exit(1);
-  });
-} catch (error) {
-  console.error("Database connection failed.");
-  console.error(`DB_HOST=${process.env.DB_HOST} DB_PORT=${process.env.DB_PORT} DB_USER=${process.env.DB_USER} DB_NAME=${process.env.DB_NAME}`);
+  }
+
+  console.error("Server failed to start.");
   console.error(error.message);
   process.exit(1);
-}
+});
+
+verifyDatabaseConnection()
+  .then(() => {
+    console.log("Database connected.");
+  })
+  .catch((error) => {
+    console.error("Database connection check failed. Server is running, but DB-backed APIs may fail until DB is reachable.");
+    console.error(`DB_HOST=${process.env.DB_HOST} DB_PORT=${process.env.DB_PORT} DB_USER=${process.env.DB_USER} DB_NAME=${process.env.DB_NAME}`);
+    console.error(error.message);
+  });
