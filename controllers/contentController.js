@@ -107,9 +107,9 @@ export const listContent = (resource) => async (req, res, next) => {
       params.push(Number(req.query.rating));
     }
 
-    if (resource === "ads" && !adminMode) {
-      // Public ad feed should use the latest ad per placement/scope,
-      // so deactivating the latest one hides that placement immediately.
+    const latestOnlyAds = resource === "ads" && (req.query.latestOnly === "true" || !adminMode);
+    if (latestOnlyAds) {
+      // Use latest ad per placement/scope to keep admin and client behavior aligned.
       filters.push(
         `t.id IN (
           SELECT latest.id
