@@ -10,6 +10,8 @@ import authRoutes from "./routes/authRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import contentRoutes from "./routes/contentRoutes.js";
 import cyberRoutes from "./routes/cyberRoutes.js";
+import { attachUserIfAuthenticated, authenticate, authorize } from "./middlewares/auth.js";
+import { listUploadedImages } from "./controllers/contentController.js";
 import { errorHandler, notFoundHandler } from "./middlewares/errorHandler.js";
 import { verifyDatabaseConnection } from "./config/db.js";
 
@@ -83,6 +85,14 @@ app.get("/api/status", async (_req, res) => {
     });
   }
 });
+
+app.get(
+  "/api/uploads/gallery",
+  attachUserIfAuthenticated,
+  authenticate,
+  authorize("admin", "editor"),
+  listUploadedImages
+);
 
 app.use("/api/auth", authRoutes);
 app.use("/api", contentRoutes);
