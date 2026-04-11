@@ -1,7 +1,15 @@
 import slugify from "slugify";
+import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 import { pool } from "../config/db.js";
 import { buildPagination, listResponse, normalizeSort } from "../utils/query.js";
 import { createMeta } from "../utils/seo.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsRoot = path.resolve(__dirname, "../uploads");
+const galleryFolders = ["gallery", "blogs", "ads"];
 
 const tableMap = {
   tools: { table: "tools", singular: "tool", allowedSorts: ["created_at", "name"] },
@@ -564,6 +572,72 @@ export const uploadAdImage = async (req, res, next) => {
         originalName: req.file.originalname,
         size: req.file.size
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const uploadGalleryImageAsset = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Image file is required." });
+    }
+
+    const origin = resolvePublicServerOrigin(req);
+    const fileUrl = `${origin}/uploads/gallery/${req.file.filename}`;
+
+    return res.status(201).json({
+      message: "Image uploaded successfully.",
+      file: {
+        url: fileUrl,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        size: req.file.size
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const mapImageToGalleryItem = (fileStat, folderName, fileName, origin) => ({
+  id: `${folderName}/${fileName}`,
+  folder: folderName,
+  filename: fileName,
+  size: fileStat.size,
+  modifiedAt: fileStat.mtime,
+  url: `${origin}/uploads/${folderName}/${fileName}`
+});
+
+export const listUploadedImages = async (req, res, next) => {
+  try {
+    const origin = resolvePublicServerOrigin(req);
+    const items = [];
+
+    for (const folderName of galleryFolders) {
+      const dirPath = path.join(uploadsRoot, folderName);
+      let entries = [];
+      try {
+        entries = await fs.readdir(dirPath, { withFileTypes: true });
+      } catch {
+        entries = [];
+      }
+
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const lower = entry.name.toLowerCase();
+        if (!/\.(png|jpe?g|gif|webp|svg|avif)$/.test(lower)) continue;
+        const filePath = path.join(dirPath, entry.name);
+        const fileStat = await fs.stat(filePath);
+        items.push(mapImageToGalleryItem(fileStat, folderName, entry.name, origin));
+      }
+    }
+
+    items.sort((left, right) => new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime());
+
+    return res.json({
+      items
     });
   } catch (error) {
     next(error);

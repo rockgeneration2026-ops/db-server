@@ -8,9 +8,11 @@ const __dirname = path.dirname(__filename);
 const uploadsRoot = path.resolve(__dirname, "../uploads");
 const blogUploadsDir = path.join(uploadsRoot, "blogs");
 const adUploadsDir = path.join(uploadsRoot, "ads");
+const galleryUploadsDir = path.join(uploadsRoot, "gallery");
 
 fs.mkdirSync(blogUploadsDir, { recursive: true });
 fs.mkdirSync(adUploadsDir, { recursive: true });
+fs.mkdirSync(galleryUploadsDir, { recursive: true });
 
 const createStorage = (targetDir) =>
   multer.diskStorage({
@@ -44,5 +46,13 @@ export const uploadAdImage = multer({
   fileFilter: imageFileFilter,
   limits: {
     fileSize: 5 * 1024 * 1024
+  }
+});
+
+export const uploadGalleryImage = multer({
+  storage: createStorage(galleryUploadsDir),
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024
   }
 });

@@ -10,15 +10,17 @@ import {
   listCategories,
   listComments,
   listContent,
+  listUploadedImages,
   listSubmissions,
   submitUserBlog,
   trackAnalytics,
   uploadAdImage,
+  uploadGalleryImageAsset,
   uploadEditorImage,
   updateContent
 } from "../controllers/contentController.js";
 import { attachUserIfAuthenticated, authenticate, authorize } from "../middlewares/auth.js";
-import { uploadAdImage as uploadAdImageFile, uploadBlogImage } from "../middlewares/upload.js";
+import { uploadAdImage as uploadAdImageFile, uploadBlogImage, uploadGalleryImage } from "../middlewares/upload.js";
 
 const router = Router();
 
@@ -78,6 +80,19 @@ router.post(
   authorize("admin"),
   uploadAdImageFile.single("image"),
   uploadAdImage
+);
+router.get(
+  "/uploads/gallery",
+  authenticate,
+  authorize("admin", "editor"),
+  listUploadedImages
+);
+router.post(
+  "/uploads/image",
+  authenticate,
+  authorize("admin", "editor"),
+  uploadGalleryImage.single("image"),
+  uploadGalleryImageAsset
 );
 
 export default router;
