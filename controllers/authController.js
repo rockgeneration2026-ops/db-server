@@ -254,7 +254,21 @@ export const verifyEmail = async (req, res, next) => {
       );
 
       await pool.query("DELETE FROM registration_requests WHERE id = ?", [pendingUser.id]);
-      return res.json({ message: "Email verified successfully. You can now log in." });
+
+      const user = {
+        id: result.insertId,
+        name: pendingUser.name,
+        email: pendingUser.email,
+        role: pendingUser.role,
+        status: "active"
+      };
+      const token = signToken(user);
+
+      return res.json({
+        message: "Email verified successfully. You are now logged in.",
+        token,
+        user
+      });
     }
 
     const tokenHash = hashVerificationToken(token);
