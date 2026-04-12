@@ -4,7 +4,6 @@ import jwt from "jsonwebtoken";
 import { pool } from "../config/db.js";
 import { sendVerificationEmail } from "../utils/mailer.js";
 
-const isLocalAppUrl = () => /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?$/i.test(process.env.APP_URL || "http://localhost:5173");
 const envAdminEmail = process.env.MASTER_ADMIN_EMAIL?.trim();
 const envAdminPassword = process.env.MASTER_ADMIN_PASSWORD?.trim();
 const envAdminName = process.env.MASTER_ADMIN_NAME?.trim() || "Master Admin";
@@ -80,13 +79,11 @@ export const register = async (req, res, next) => {
       );
     }
 
-    const verificationUrl = isLocalAppUrl() ? buildVerificationUrl(rawVerificationCode) : undefined;
-    await sendVerificationEmail({ email, name, verificationCode: rawVerificationCode, verificationUrl });
+    await sendVerificationEmail({ email, name, verificationCode: rawVerificationCode });
 
     return res.status(201).json({
       message: "Registration successful. Please verify your email with the OTP sent to your inbox.",
-      verificationRequired: true,
-      verificationUrl
+      verificationRequired: true
     });
   } catch (error) {
     next(error);
@@ -323,12 +320,10 @@ export const resendVerificationEmail = async (req, res, next) => {
       [verificationTokenHash, user.id]
     );
 
-    const verificationUrl = isLocalAppUrl() ? buildVerificationUrl(rawVerificationCode) : undefined;
-    await sendVerificationEmail({ email: user.email, name: user.name, verificationCode: rawVerificationCode, verificationUrl });
+    await sendVerificationEmail({ email: user.email, name: user.name, verificationCode: rawVerificationCode });
 
     res.json({
-      message: "Verification email sent.",
-      verificationUrl
+      message: "Verification email sent."
     });
   } catch (error) {
     next(error);
