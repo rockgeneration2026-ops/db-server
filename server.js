@@ -1,6 +1,7 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import fs from "fs";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
@@ -17,6 +18,7 @@ import { verifyDatabaseConnection } from "./config/db.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const clientDistPath = path.resolve(__dirname, "../client/dist");
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const configuredOrigins = (process.env.CORS_ORIGIN || process.env.CORS_ORIGINS || "")
@@ -98,6 +100,18 @@ app.use("/api/auth", authRoutes);
 app.use("/api", contentRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/cyber", cyberRoutes);
+
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/uploads") || path.extname(req.path)) {
+      return next();
+    }
+
+    return res.sendFile(path.join(clientDistPath, "index.html"));
+  });
+}
 
 app.use(notFoundHandler);
 app.use(errorHandler);

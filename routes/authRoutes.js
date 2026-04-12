@@ -13,7 +13,16 @@ router.post(
 );
 
 router.post("/login", [body("email").isEmail(), body("password").notEmpty(), handleValidation], login);
-router.post("/verify-email", [body("token").notEmpty(), handleValidation], verifyEmail);
+router.post(
+  "/verify-email",
+  [
+    body("token").optional().isString().trim(),
+    body("email").optional().isEmail(),
+    body("code").optional().isString().trim().isLength({ min: 4, max: 12 }),
+    handleValidation
+  ],
+  verifyEmail
+);
 router.post("/resend-verification", [body("email").isEmail(), handleValidation], resendVerificationEmail);
 router.get("/me", authenticate, me);
 router.patch(

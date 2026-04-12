@@ -45,10 +45,19 @@ const createTransporter = async () => {
   });
 };
 
-export const sendVerificationEmail = async ({ email, name, verificationUrl }) => {
+export const sendVerificationEmail = async ({ email, name, verificationCode, verificationUrl }) => {
   const smtp = await getSmtpSettings();
   const activeTransporter = await createTransporter();
   const from = smtp?.from || "Darkgorkha <no-reply@darkgorkha.com>";
+
+  const codeBlock = verificationCode
+    ? `<div style="margin:24px 0;padding:18px 24px;border-radius:18px;background:#0ea5e9;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:0.2em;text-align:center;">${verificationCode}</div>`
+    : "";
+
+  const fallbackLink = verificationUrl
+    ? `<p style="line-height:1.7">If you prefer, you can also verify with this link:</p>
+       <p style="word-break:break-all;color:#7dd3fc">${verificationUrl}</p>`
+    : "";
 
   const info = await activeTransporter.sendMail({
     from,
@@ -59,13 +68,10 @@ export const sendVerificationEmail = async ({ email, name, verificationUrl }) =>
         <h1 style="color:#ffffff;margin-bottom:12px">Verify your email</h1>
         <p style="line-height:1.7">Hi ${name || "there"},</p>
         <p style="line-height:1.7">Thanks for registering on Darkgorkha. Please verify your email address to activate your account and log in.</p>
-        <p style="margin:24px 0">
-          <a href="${verificationUrl}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:#0ea5e9;color:#ffffff;text-decoration:none;font-weight:700">
-            Verify Email
-          </a>
-        </p>
-        <p style="line-height:1.7">If the button does not work, open this link:</p>
-        <p style="word-break:break-all;color:#7dd3fc">${verificationUrl}</p>
+        <p style="line-height:1.7">Use this verification code on the verification page:</p>
+        ${codeBlock}
+        <p style="line-height:1.7">Enter the code on the Darkgorkha verify page to complete registration.</p>
+        ${fallbackLink}
       </div>
     `
   });

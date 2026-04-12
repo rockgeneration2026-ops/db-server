@@ -40,6 +40,18 @@ const buildVerificationUrl = (token) => {
   return `${appUrl}/verify-email?token=${token}`;
 };
 
+const buildVerificationCode = () => {
+  return String(Math.floor(100000 + Math.random() * 900000));
+};
+
+const findPendingRequest = async (email) => {
+  const [rows] = await pool.query(
+    "SELECT id, name, email, password_hash, role FROM registration_requests WHERE email = ? LIMIT 1",
+    [email]
+  );
+  return rows[0] || null;
+};
+
 export const register = async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
@@ -49,28 +61,32 @@ export const register = async (req, res, next) => {
       return res.status(409).json({ message: "Email is already registered." });
     }
 
+    const pending = await findPendingRequest(email);
     const passwordHash = await bcrypt.hash(password, 10);
-    const rawVerificationToken = crypto.randomBytes(32).toString("hex");
-    const verificationTokenHash = hashVerificationToken(rawVerificationToken);
-    const [result] = await pool.query(
-      `INSERT INTO users
-      (name, email, password_hash, role, status, email_verification_token, email_verification_sent_at)
-      VALUES (?, ?, ?, 'user', 'active', ?, NOW())`,
-      [name, email, passwordHash, verificationTokenHash]
-    );
-    const [rows] = await pool.query(
-      "SELECT id, name, email, role, status, email_verified_at, created_at FROM users WHERE id = ?",
-      [result.insertId]
-    );
+    const rawVerificationCode = buildVerificationCode();
+    const verificationTokenHash = hashVerificationToken(rawVerificationCode);
 
-    const verificationUrl = buildVerificationUrl(rawVerificationToken);
-    await sendVerificationEmail({ email, name, verificationUrl });
+    if (pending) {
+      await pool.query(
+        "UPDATE registration_requests SET name = ?, password_hash = ?, role = 'user', email_verification_token = ?, email_verification_sent_at = NOW(), updated_at = NOW() WHERE id = ?",
+        [name, passwordHash, verificationTokenHash, pending.id]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO registration_requests
+        (name, email, password_hash, role, status, email_verification_token, email_verification_sent_at)
+        VALUES (?, ?, ?, 'user', 'active', ?, NOW())`,
+        [name, email, passwordHash, verificationTokenHash]
+      );
+    }
+
+    const verificationUrl = isLocalAppUrl() ? buildVerificationUrl(rawVerificationCode) : undefined;
+    await sendVerificationEmail({ email, name, verificationCode: rawVerificationCode, verificationUrl });
 
     return res.status(201).json({
-      user: rows[0],
-      message: "Registration successful. Please verify your email before logging in.",
+      message: "Registration successful. Please verify your email with the OTP sent to your inbox.",
       verificationRequired: true,
-      verificationUrl: isLocalAppUrl() ? verificationUrl : undefined
+      verificationUrl
     });
   } catch (error) {
     next(error);
@@ -199,13 +215,53 @@ export const updateMe = async (req, res, next) => {
 export const verifyEmail = async (req, res, next) => {
   try {
     const token = req.body.token?.trim();
+    const code = req.body.code?.trim();
+    const email = req.body.email?.trim();
 
-    if (!token) {
-      return res.status(400).json({ message: "Verification token is required." });
+    if (!token && !code) {
+      return res.status(400).json({ message: "Verification token or code is required." });
+    }
+
+    let rows;
+
+    if (code) {
+      if (!email) {
+        return res.status(400).json({ message: "Email is required when verifying with a code." });
+      }
+      const codeHash = hashVerificationToken(code);
+      [rows] = await pool.query(
+        `SELECT id, name, email, password_hash, role
+         FROM registration_requests
+         WHERE email = ? AND email_verification_token = ?
+         LIMIT 1`,
+        [email, codeHash]
+      );
+
+      if (!rows.length) {
+        return res.status(400).json({ message: "Invalid or expired verification code." });
+      }
+
+      const pendingUser = rows[0];
+      const [existingUser] = await pool.query("SELECT id FROM users WHERE email = ?", [pendingUser.email]);
+
+      if (existingUser.length) {
+        await pool.query("DELETE FROM registration_requests WHERE id = ?", [pendingUser.id]);
+        return res.status(400).json({ message: "Email is already registered." });
+      }
+
+      const [result] = await pool.query(
+        `INSERT INTO users
+         (name, email, password_hash, role, status, email_verified_at)
+         VALUES (?, ?, ?, ?, 'active', NOW())`,
+        [pendingUser.name, pendingUser.email, pendingUser.password_hash, pendingUser.role]
+      );
+
+      await pool.query("DELETE FROM registration_requests WHERE id = ?", [pendingUser.id]);
+      return res.json({ message: "Email verified successfully. You can now log in." });
     }
 
     const tokenHash = hashVerificationToken(token);
-    const [rows] = await pool.query(
+    [rows] = await pool.query(
       `SELECT id, email_verified_at
        FROM users
        WHERE email_verification_token = ?
@@ -214,7 +270,7 @@ export const verifyEmail = async (req, res, next) => {
     );
 
     if (!rows.length) {
-      return res.status(400).json({ message: "Invalid or expired verification link." });
+      return res.status(400).json({ message: "Invalid or expired verification code." });
     }
 
     if (rows[0].email_verified_at) {
@@ -243,8 +299,14 @@ export const resendVerificationEmail = async (req, res, next) => {
       return res.status(400).json({ message: "Email is required." });
     }
 
+    const [existingUser] = await pool.query("SELECT id FROM users WHERE email = ? LIMIT 1", [email]);
+
+    if (existingUser.length) {
+      return res.status(400).json({ message: "Email is already registered." });
+    }
+
     const [rows] = await pool.query(
-      "SELECT id, name, email, email_verified_at FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, name, email FROM registration_requests WHERE email = ? LIMIT 1",
       [email]
     );
 
@@ -253,25 +315,20 @@ export const resendVerificationEmail = async (req, res, next) => {
     }
 
     const user = rows[0];
-
-    if (user.email_verified_at) {
-      return res.status(400).json({ message: "Email is already verified." });
-    }
-
-    const rawVerificationToken = crypto.randomBytes(32).toString("hex");
-    const verificationTokenHash = hashVerificationToken(rawVerificationToken);
+    const rawVerificationCode = buildVerificationCode();
+    const verificationTokenHash = hashVerificationToken(rawVerificationCode);
 
     await pool.query(
-      "UPDATE users SET email_verification_token = ?, email_verification_sent_at = NOW() WHERE id = ?",
+      "UPDATE registration_requests SET email_verification_token = ?, email_verification_sent_at = NOW(), updated_at = NOW() WHERE id = ?",
       [verificationTokenHash, user.id]
     );
 
-    const verificationUrl = buildVerificationUrl(rawVerificationToken);
-    await sendVerificationEmail({ email: user.email, name: user.name, verificationUrl });
+    const verificationUrl = isLocalAppUrl() ? buildVerificationUrl(rawVerificationCode) : undefined;
+    await sendVerificationEmail({ email: user.email, name: user.name, verificationCode: rawVerificationCode, verificationUrl });
 
     res.json({
       message: "Verification email sent.",
-      verificationUrl: isLocalAppUrl() ? verificationUrl : undefined
+      verificationUrl
     });
   } catch (error) {
     next(error);
